@@ -16,6 +16,7 @@ import requests
 from tools import cli
 from pyVmomi import vim
 from pyVim.connect import SmartConnect, Disconnect
+import ssl
 
 # disable  urllib3 warnings
 if hasattr(requests.packages.urllib3, 'disable_warnings'):
@@ -26,8 +27,8 @@ def get_args():
     parser = cli.build_arg_parser()
     parser.add_argument('-n', '--name', required=False,
                         help="Name of the Datastore.")
-    my_args = parser.parse_args()
-    return cli.prompt_for_password(my_args)
+    args = parser.parse_args()
+    return args
 
 
 def get_obj(content, vim_type, name=None):
@@ -67,30 +68,38 @@ def print_datastore_info(ds_obj):
     ds_overp = ds_provisioned - ds_capacity
     ds_overp_pct = (ds_overp * 100) / ds_capacity \
         if ds_capacity else 0
-    print ""
-    print "Name                  : {}".format(summary.name)
-    print "URL                   : {}".format(summary.url)
-    print "Capacity              : {} GB".format(sizeof_fmt(ds_capacity))
-    print "Free Space            : {} GB".format(sizeof_fmt(ds_freespace))
-    print "Uncommitted           : {} GB".format(sizeof_fmt(ds_uncommitted))
-    print "Provisioned           : {} GB".format(sizeof_fmt(ds_provisioned))
+    print("")
+    print("Name                  : {}".format(summary.name))
+    print("URL                   : {}".format(summary.url))
+    print("Capacity              : {} GB".format(sizeof_fmt(ds_capacity)))
+    print("Free Space            : {} GB".format(sizeof_fmt(ds_freespace)))
+    print("Uncommitted           : {} GB".format(sizeof_fmt(ds_uncommitted)))
+    print("Provisioned           : {} GB".format(sizeof_fmt(ds_provisioned)))
     if ds_overp > 0:
-        print "Over-provisioned      : {} GB / {} %".format(
+        print("Over-provisioned      : {} GB / {} %".format(
             sizeof_fmt(ds_overp),
-            ds_overp_pct)
-    print "Hosts                 : {}".format(len(ds_obj.host))
-    print "Virtual Machines      : {}".format(len(ds_obj.vm))
+            ds_overp_pct))
+    print("Hosts                 : {}".format(len(ds_obj.host)))
+    print("Virtual Machines      : {}".format(len(ds_obj.vm)))
 
 
 def main():
     args = get_args()
+
+    sslContext = None
+
+    if args.disable_ssl_verification:
+        sslContext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+        sslContext.verify_mode = ssl.CERT_NONE
 
     # connect to vc
     si = SmartConnect(
         host=args.host,
         user=args.user,
         pwd=args.password,
-        port=args.port)
+        port=args.port,
+        sslContext=sslContext)
+
     # disconnect vc
     atexit.register(Disconnect, si)
 

@@ -22,6 +22,7 @@ a friendly encouragement to joining the community!
 import atexit
 import argparse
 import getpass
+import ssl
 
 from pyVim import connect
 from pyVmomi import vmodl
@@ -56,6 +57,10 @@ def get_args():
                         action='store',
                         help='Password to use when connecting to host')
 
+    parser.add_argument('-S', '--disable_ssl_verification',
+                        required=False,
+                        action='store_true',
+                        help='Disable ssl host certificate verification')
     args = parser.parse_args()
 
     if not args.password:
@@ -73,28 +78,35 @@ def main():
     args = get_args()
 
     try:
+        sslContext = None
+
+        if args.disable_ssl_verification:
+            sslContext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+            sslContext.verify_mode = ssl.CERT_NONE
+
         service_instance = connect.SmartConnect(host=args.host,
                                                 user=args.user,
                                                 pwd=args.password,
-                                                port=int(args.port))
+                                                port=int(args.port),
+                                                sslContext=sslContext)
 
         atexit.register(connect.Disconnect, service_instance)
 
-        print "\nHello World!\n"
-        print "If you got here, you authenticted into vCenter."
-        print "The server is {}!".format(args.host)
+        print("\nHello World!\n")
+        print("If you got here, you authenticted into vCenter.")
+        print("The server is {}!".format(args.host))
         # NOTE (hartsock): only a successfully authenticated session has a
         # session key aka session id.
         session_id = service_instance.content.sessionManager.currentSession.key
-        print "current session id: {}".format(session_id)
-        print "Well done!"
-        print "\n"
-        print "Download, learn and contribute back:"
-        print "https://github.com/vmware/pyvmomi-community-samples"
-        print "\n\n"
+        print("current session id: {}".format(session_id))
+        print("Well done!")
+        print("\n")
+        print("Download, learn and contribute back:")
+        print("https://github.com/vmware/pyvmomi-community-samples")
+        print("\n\n")
 
     except vmodl.MethodFault as error:
-        print "Caught vmodl fault : " + error.msg
+        print("Caught vmodl fault : " + error.msg)
         return -1
 
     return 0
