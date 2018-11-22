@@ -4,12 +4,13 @@ from __future__ import print_function  # This import is for python2.*
 import atexit
 import requests
 import ssl
-
+import os.path
 from pyVim import connect
 from pyVmomi import vim
 from pyVmomi import vmodl
 
 from tools import cli
+from pyVim.task import WaitForTask
 
 
 def get_args():
@@ -38,31 +39,57 @@ def get_args():
 
     return cli.prompt_for_password(args)
 
+
 def findDatastore(content, name):
+    """
+
+    :param content:
+    :type content: pyVmomi.VmomiSupport.vim.ServiceInstanceContent
+    :param name:
+    :type name: str
+    :return:
+    :rtype:
+    """
+
     try:
         # Get the list of all datacenters we have available to us
-        datacenters_object_view = content.viewManager.CreateContainerView(
+        datacenter_view = content.viewManager.CreateContainerView(
             content.rootFolder,
             [vim.Datacenter],
             True)
 
         # Find the datastore and datacenter we are using
-        for dc in datacenters_object_view.view:
+        for dc in datacenter_view.view:
             try:
-                datastores_object_view = content.viewManager.CreateContainerView(
+                datastore_view = content.viewManager.CreateContainerView(
                     dc,
                     [vim.Datastore],
                     True)
-                datastore = next((x for x in datastores_object_view.view if x.info.name == name), None)
+                datastore = next((x for x in datastore_view.view if x.info.name == name), None)
                 if datastore:
-                    return datastore
+                    return dc, datastore
             finally:
-                datastores_object_view.Destroy()
+                datastore_view.Destroy()
     finally:
         # Clean up the views now that we have what we need
-        datacenters_object_view.Destroy()
+        datacenter_view.Destroy()
 
     return None
+
+
+def copyFile(content, datacenter, source_path, dest_path):
+    def OnTaskProgressUpdate(task, status):
+        if status != 'created':
+            print("Task {0} is {1}% complete.".format(task.info.descriptionId, status))
+
+    file_manager = content.fileManager
+    # ensure target directory exists
+    path = os.path.dirname(dest_path)
+    file_manager.MakeDirectory(path, datacenter, createParentDirectories=True)
+    task = file_manager.CopyDatastoreFile_Task(source_path, datacenter, dest_path, datacenter, force=True)
+    WaitForTask(task, onProgressUpdate=OnTaskProgressUpdate)
+    taskResult = task.info.result
+
 
 def main():
     args = get_args()
@@ -97,9 +124,13 @@ def main():
         atexit.register(connect.Disconnect, service_instance)
 
         content = service_instance.RetrieveContent()
-        source_datastore = findDatastore(content, args.source_datastore)
-        destination_datastore = findDatastore(content, args.destination_datastore)
-      
+        (source_dc, source_datastore) = findDatastore(content, args.source_datastore)
+        (dest_dc, destination_datastore) = findDatastore(content, args.destination_datastore)
+
+        source_path = "[{0}] {1}".format(source_datastore.name, args.source_file)
+        dest_path = "[{0}] {1}".format(destination_datastore.name, args.destination_file)
+        copyFile(content, source_dc, source_path, dest_path)
+
     except vmodl.MethodFault as e:
         print("Caught vmodl fault : " + e.msg)
         raise SystemExit(-1)
@@ -109,31 +140,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# This may or may not be useful to the person who writes the download example
-# def download(remote_file_path, local_file_path):
-#    resource = "/folder/%s" % remote_file_path.lstrip("/")
-#    url = self._get_url(resource)
-#
-#    if sys.version_info >= (2, 6):
-#        resp = self._do_request(url)
-#        CHUNK = 16 * 1024
-#        fd = open(local_file_path, "wb")
-#        while True:
-#            chunk = resp.read(CHUNK)
-#            if not chunk: break
-#            fd.write(chunk)
-#        fd.close()
-#    else:
-#        urllib.urlretrieve(url, local_file_path)
-#
-
-# This may or may not be useful to the person who tries to use a service
-# request in the future
-
-# Get the service request set up
-#        service_request_spec = vim.SessionManager.HttpServiceRequestSpec(
-#            method='httpPut', url=http_url)
-#        ticket = session_manager.AcquireGenericServiceTicket(
-#            service_request_spec)
