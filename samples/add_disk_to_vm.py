@@ -19,32 +19,15 @@ from pyVim.connect import SmartConnect, Disconnect
 import atexit
 import argparse
 import getpass
+from tools import cli
+from pyVim import connect
+import requests
+import ssl
+
 
 
 def get_args():
-    parser = argparse.ArgumentParser(
-        description='Arguments for talking to vCenter')
-
-    parser.add_argument('-s', '--host',
-                        required=True,
-                        action='store',
-                        help='vSpehre service to connect to')
-
-    parser.add_argument('-o', '--port',
-                        type=int,
-                        default=443,
-                        action='store',
-                        help='Port to connect on')
-
-    parser.add_argument('-u', '--user',
-                        required=True,
-                        action='store',
-                        help='User name to use')
-
-    parser.add_argument('-p', '--password',
-                        required=False,
-                        action='store',
-                        help='Password to use')
+    parser = cli.build_arg_parser()
 
     parser.add_argument('-v', '--vm-name',
                         required=False,
@@ -99,7 +82,7 @@ def add_disk(vm, si, disk_size, disk_type):
                 if unit_number == 7:
                     unit_number += 1
                 if unit_number >= 16:
-                    print "we don't support this many disks"
+                    print("we don't support this many disks")
                     return
             if isinstance(dev, vim.vm.device.VirtualSCSIController):
                 controller = dev
@@ -121,33 +104,49 @@ def add_disk(vm, si, disk_size, disk_type):
         dev_changes.append(disk_spec)
         spec.deviceChange = dev_changes
         vm.ReconfigVM_Task(spec=spec)
-        print "%sGB disk added to %s" % (disk_size, vm.config.name)
+        print("%sGB disk added to %s" % (disk_size, vm.config.name))
 
 
 def main():
     args = get_args()
 
-    # connect this thing
-    si = SmartConnect(
-        host=args.host,
-        user=args.user,
-        pwd=args.password,
-        port=args.port)
-    # disconnect this thing
-    atexit.register(Disconnect, si)
+    service_instance = None
+    sslContext = None
+    verify_cert = None
+
+    if args.disable_ssl_verification:
+        sslContext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+        sslContext.verify_mode = ssl.CERT_NONE
+        verify_cert = False
+        # disable urllib3 warnings
+        if hasattr(requests.packages.urllib3, 'disable_warnings'):
+            requests.packages.urllib3.disable_warnings()
+
+    try:
+        service_instance = connect.SmartConnect(host=args.host,
+                                                user=args.user,
+                                                pwd=args.password,
+                                                port=int(args.port),
+                                                sslContext=sslContext)
+    except IOError as e:
+        pass
+    if not service_instance:
+        print("Could not connect to the specified host using specified "
+              "username and password")
+        raise SystemExit(-1)
 
     vm = None
     if args.uuid:
-        search_index = si.content.searchIndex
+        search_index = service_instance.content.searchIndex
         vm = search_index.FindByUuid(None, args.uuid, True)
     elif args.vm_name:
-        content = si.RetrieveContent()
+        content = service_instance.RetrieveContent()
         vm = get_obj(content, [vim.VirtualMachine], args.vm_name)
 
     if vm:
-        add_disk(vm, si, args.disk_size, args.disk_type)
+        add_disk(vm, service_instance, args.disk_size, args.disk_type)
     else:
-        print "VM not found"
+        print("VM not found")
 
 
 # start this thing
